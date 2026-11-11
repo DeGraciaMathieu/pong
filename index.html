@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pong</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #111;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    background: #000;
+    border: 2px solid #444;
+    max-width: 95vw;
+    max-height: 80vh;
+  }
+  p { margin: 12px 0 0; color: #999; font-size: 14px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="500"></canvas>
+<p>Joueur : <b>W</b> / <b>S</b> ou <b>↑</b> / <b>↓</b> — <b>Espace</b> : démarrer / pause — Premier à 7 points</p>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  const PADDLE_W = 12, PADDLE_H = 90, PADDLE_SPEED = 420;
+  const AI_SPEED = 330;
+  const BALL_SIZE = 12, BALL_START_SPEED = 360, BALL_MAX_SPEED = 900;
+  const WIN_SCORE = 7;
+
+  const player = { x: 24, y: H / 2 - PADDLE_H / 2, score: 0 };
+  const ai = { x: W - 24 - PADDLE_W, y: H / 2 - PADDLE_H / 2, score: 0 };
+  const ball = { x: 0, y: 0, vx: 0, vy: 0 };
+
+  let state = 'menu'; // menu | playing | paused | over
+  const keys = {};
+
+  function resetBall(direction) {
+    ball.x = W / 2 - BALL_SIZE / 2;
+    ball.y = H / 2 - BALL_SIZE / 2;
+    const angle = (Math.random() * 0.8 - 0.4); // ~ ±23°
+    ball.vx = Math.cos(angle) * BALL_START_SPEED * direction;
+    ball.vy = Math.sin(angle) * BALL_START_SPEED;
+  }
+
+  function newGame() {
+    player.score = 0;
+    ai.score = 0;
+    player.y = ai.y = H / 2 - PADDLE_H / 2;
+    resetBall(Math.random() < 0.5 ? -1 : 1);
+    state = 'playing';
+  }
+
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+  function collide(p) {
+    return ball.x < p.x + PADDLE_W && ball.x + BALL_SIZE > p.x &&
+           ball.y < p.y + PADDLE_H && ball.y + BALL_SIZE > p.y;
+  }
+
+  function bounceOff(p, dir) {
+    // Angle depends on where the ball hits the paddle
+    const rel = ((ball.y + BALL_SIZE / 2) - (p.y + PADDLE_H / 2)) / (PADDLE_H / 2);
+    const angle = clamp(rel, -1, 1) * (Math.PI / 3); // max 60°
+    const speed = Math.min(Math.hypot(ball.vx, ball.vy) * 1.06, BALL_MAX_SPEED);
+    ball.vx = Math.cos(angle) * speed * dir;
+    ball.vy = Math.sin(angle) * speed;
+    ball.x = dir > 0 ? p.x + PADDLE_W : p.x - BALL_SIZE;
+  }
+
+  function update(dt) {
+    // Player
+    let move = 0;
+    if (keys['w'] || keys['arrowup']) move -= 1;
+    if (keys['s'] || keys['arrowdown']) move += 1;
+    player.y = clamp(player.y + move * PADDLE_SPEED * dt, 0, H - PADDLE_H);
+
+    // AI: follows the ball when it's coming, otherwise drifts to center
+    const target = ball.vx > 0 ? ball.y + BALL_SIZE / 2 : H / 2;
+    const center = ai.y + PADDLE_H / 2;
+    const diff = target - center;
+    if (Math.abs(diff) > 6) {
+      ai.y += Math.sign(diff) * Math.min(Math.abs(diff), AI_SPEED * dt);
+    }
+    ai.y = clamp(ai.y, 0, H - PADDLE_H);
+
+    // Ball
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+
+    if (ball.y <= 0) { ball.y = 0; ball.vy = Math.abs(ball.vy); }
+    if (ball.y + BALL_SIZE >= H) { ball.y = H - BALL_SIZE; ball.vy = -Math.abs(ball.vy); }
+
+    if (ball.vx < 0 && collide(player)) bounceOff(player, 1);
+    if (ball.vx > 0 && collide(ai)) bounceOff(ai, -1);
+
+    // Scoring
+    if (ball.x + BALL_SIZE < 0) { ai.score++; afterPoint(-1); }
+    else if (ball.x > W) { player.score++; afterPoint(1); }
+  }
+
+  function afterPoint(direction) {
+    if (player.score >= WIN_SCORE || ai.score >= WIN_SCORE) {
+      state = 'over';
+    } else {
+      resetBall(direction);
+    }
+  }
+
+  function draw() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    // Center net
+    ctx.fillStyle = '#333';
+    for (let y = 10; y < H; y += 30) ctx.fillRect(W / 2 - 2, y, 4, 16);
+
+    // Scores
+    ctx.fillStyle = '#777';
+    ctx.font = 'bold 56px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(player.score, W / 4, 70);
+    ctx.fillText(ai.score, (3 * W) / 4, 70);
+
+    // Paddles & ball
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(player.x, player.y, PADDLE_W, PADDLE_H);
+    ctx.fillRect(ai.x, ai.y, PADDLE_W, PADDLE_H);
+    if (state === 'playing' || state === 'paused') {
+      ctx.fillRect(ball.x, ball.y, BALL_SIZE, BALL_SIZE);
+    }
+
+    // Overlays
+    if (state !== 'playing') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 48px monospace';
+      let title = 'PONG', sub = 'Appuie sur Espace pour jouer';
+      if (state === 'paused') { title = 'PAUSE'; sub = 'Espace pour reprendre'; }
+      if (state === 'over') {
+        title = player.score > ai.score ? 'Victoire !' : 'Défaite...';
+        sub = 'Espace pour rejouer';
+      }
+      ctx.fillText(title, W / 2, H / 2 - 10);
+      ctx.font = '20px monospace';
+      ctx.fillText(sub, W / 2, H / 2 + 30);
+    }
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 1000, 1 / 30); // cap to avoid tunnelling after tab switch
+    last = now;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (['arrowup', 'arrowdown', ' '].includes(k)) e.preventDefault();
+    if (k === ' ') {
+      if (state === 'menu' || state === 'over') newGame();
+      else if (state === 'playing') state = 'paused';
+      else if (state === 'paused') state = 'playing';
+      return;
+    }
+    keys[k] = true;
+  });
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+  window.addEventListener('blur', () => { if (state === 'playing') state = 'paused'; });
+
+  resetBall(1);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
